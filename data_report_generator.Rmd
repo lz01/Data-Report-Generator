@@ -1,0 +1,246 @@
+---
+title: Data report
+output:
+  html_document:
+    number_sections: TRUE
+    toc: TRUE
+    code_folding: hide
+params:
+  df:  mtcars
+  max_nb_distinct_hist:  10
+  min_cor_to_draw:  0.4
+---
+
+<style>
+
+body {
+text-align: justify
+font-size: 12px}
+
+h1.title {
+  font-size: 38px;
+  color: DarkBlue;
+}
+h1 { /* Header 1 */
+  font-size: 28px;
+  color: DarkBlue;
+}
+h2 { /* Header 2 */
+    font-size: 22px;
+  color: DarkBlue;
+}
+h3 { /* Header 3 */
+  font-size: 18px;
+  font-family: "Times New Roman", Times, serif;
+  color: DarkBlue;
+}
+
+</style>
+
+
+## Generate general document
+
+```{r, message = FALSE}
+
+
+## Loading libraries
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+library(corrplot)
+source("~/Desktop/L/Notes/NAwhere/NAwhere.R")
+```
+
+```{r}
+## General functions
+nb_na = function(x) {return(sum(is.na(x)))}
+nb_nan = function(x) {return(sum(is.nan(x)))}
+nb_inf = function(x) {return(sum(is.infinite(x)))}
+nb_0 = function(x) {return(sum(x==0,na.rm=T))}
+nb_1 = function(x) {return(sum(x==1,na.rm=T))}
+## is_id checks if a word contains "id" not preceded and not followed by letters, which would indicate that it is an identifier column
+is_id = function(x) {str_detect(str_to_lower(x),"(?<![a-z])id(?![a-z])")}
+```
+
+```{r}
+df = params$df
+```
+
+
+# General description
+
+Check that the input is a data.frame, or that it can be converted to a data.frame (if tibble or other)
+```{r}
+if(!is.data.frame(df))
+{
+	df = as.data.frame(df)
+}
+```
+
+Input can be a data structure and a name for the response variable.
+By default, no response variable, and all variables are treated the same.
+If there is a variable response, add a part to the report for relation between response and each other variable
+
+
+
+## Number of variables and rows
+```{r}
+p = ncol(df)
+n = nrow(df)
+```
+There are `r p` variables in the data.
+There are `r n` rows in the data.
+
+## Are there NA values?
+
+```{r, out.width = '\\textwidth'}
+df %>% summarize_all(nb_na) %>% 
+kable(caption = " Number of NA values") %>% 
+kable_styling()
+if(nb_na(df)>0) NAwhere(df)
+```
+
+## What are variable types?
+
+```{r}
+df %>% 
+summarize_all(typeof) %>% 
+kable(caption = "Variable type") %>% 
+kable_styling()
+
+```
+
+## Are there factor variables?
+```{r}
+nb_factors = sum(apply(df,2,is.factor))
+```
+
+There are `r nb_factors` factor variables.
+```{r, results = 'asis'}
+if(nb_factors>0)
+{
+df %>% 
+summarize_if(is.factor,is.factor) %>% 
+kable(caption = "Factor") %>% 
+kable_styling()
+}
+```
+
+
+# Variables
+
+## Individual variables
+```{r, warning = FALSE, message = FALSE, results = "asis"}
+
+for(i in 1:p)
+{
+	colname = names(df)[i]
+	x = df[,i]
+	
+	## Programmatically add subheader
+	cat("\n###",colname,"\n")
+	
+	nb_distinct = length(unique(x))
+	y = c(typeof(x), nb_distinct, nb_na(x))
+	vals = c("Type","Nb of distinct values","Nb of NAs")
+	
+	## hist_plot is a boolean that indicates whether we plot a histogram of the variable or not
+	## We plot a red histogram for numeric variables
+	## We plot an orange histogram for character variables with less than max_nb_distinct_hist distinct values (not to overplot)
+	## We plot an aquamarine histogram for boolean variables
+	
+	
+	hist_plot = FALSE
+	
+	## Case: numeric
+	if(is.numeric(x)) 
+	{
+		y = c(y,nb_nan(x), nb_inf(x),nb_0(x),mean(x,na.rm=T),median(x,na.rm=T),min(x,na.rm=T),max(x,na.rm=T))
+		vals = c(vals,"Nb of NaN","Nb of Inf","Nb of 0s","Mean","Median","Minimum","Maximum")
+		gg = ggplot() + geom_histogram(aes(x), fill = "darkblue", col = "white") + xlab(colname)
+		hist_plot = TRUE
+	}
+	
+	## Case boolean:
+	if(is.logical(x))
+	{
+		y = c(y,nb_1(x),nb_0(x))
+		vals = c(vals,"Nb of TRUE","Nb of FALSE")
+		gg = ggplot() + geom_histogram(aes(x), fill = "aquamarine", col = "white", stat = "count") + xlab(colname)
+		hist_plot = TRUE
+	}
+	
+	## Case character:
+	## If it has less than max_nb_distinct_hist, we plot a histogram
+	if(is.character(x) & nb_distinct <= params$max_nb_distinct_hist)
+	{
+		gg = ggplot() + geom_histogram(aes(x), fill = "orange3", col = "white", stat = "count") + xlab(colname)
+		hist_plot = TRUE
+	}
+	
+	
+	
+	#xtable::xtable(data.frame(vals,y), caption = colname)
+	
+	matrix(c(vals,y),ncol=2) %>% 
+	kable() %>%
+	kable_styling() %>%
+	print() 
+	
+	if(hist_plot) 
+	{
+		print(gg)
+	}
+ 	cat("\n")
+}
+```
+
+## Relations between variables
+
+### Correlation
+Correlations between variables as a general plot
+
+```{r, fig.width = 7}
+#, out.width = '\\textwidth'
+## We select numeric variables, that don't include the word id (we usually are not interested in id variables for correlations)
+df_num = df %>% select_if(is.numeric) %>% select(current_vars()[!is_id(current_vars())])
+cor_mat =  df_num %>% cor(use = "pairwise.complete.obs")
+
+cor_mat %>% corrplot(method = "number", order = "hclust", col = colorRampPalette(c("blue","white","red"))(200))
+#cor_mat %>% corrplot.mixed(lower = "number", upper = "shade")
+```
+
+
+
+### Scatter plots between correlated variables
+
+
+```{r}
+## We find the pairs of variables that have a correlation > min_cor_to_draw
+high_cor = abs(cor_mat) > params$min_cor_to_draw
+high_cor[upper.tri(high_cor, diag = TRUE)] = FALSE
+pairs_ind = which(high_cor, arr.ind = TRUE)
+
+
+## Draw scatterplots
+for(i in 1:nrow(pairs_ind))
+{
+	## Indexes of the 2 variables to draw
+	pair_id = pairs_ind[i,]
+	## We use aes_string as we pass a string to aes
+	gg_scatter = ggplot(df_num[,pair_id], aes_string(x = names(df_num)[pair_id[1]], y = names(df_num)[pair_id[2]])) + 
+	geom_point(alpha = 0.5 , col = "darkblue") +
+	geom_smooth(method = "lm")
+	
+	print(gg_scatter)
+	cat("  \n  \n  \n")
+}
+```
+
+
+### Boxplots between correlated variables
+
+
+
