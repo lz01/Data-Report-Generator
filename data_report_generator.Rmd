@@ -50,7 +50,8 @@ library(ggplot2)
 library(knitr)
 library(kableExtra)
 library(corrplot)
-source("~/Desktop/L/Notes/NAwhere/NAwhere.R")
+library(devtools)
+source_url("https://raw.github.com/lz01/NAwhere/master/NAwhere.R")
 ```
 
 ```{r}
